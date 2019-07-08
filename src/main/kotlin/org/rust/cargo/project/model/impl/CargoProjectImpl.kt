@@ -62,7 +62,6 @@ import org.rust.stdext.joinAll
 import java.nio.file.Path
 import java.nio.file.Paths
 import java.util.concurrent.CompletableFuture
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 
@@ -153,6 +152,9 @@ open class CargoProjectsServiceImpl(
     override val hasAtLeastOneValidProject: Boolean
         get() = hasAtLeastOneValidProject(allProjects)
 
+    // Guarded by the platform RWLock
+    override var initialized: Boolean = false
+
     override fun findProjectForFile(file: VirtualFile): CargoProject? =
         file.applyWithSymlink { directoryIndex.getInfoForFile(it).takeIf { it !== noProjectMarker } }
 
@@ -212,6 +214,7 @@ open class CargoProjectsServiceImpl(
                             .makeRootsChange(EmptyRunnable.getInstance(), false, true)
                         project.messageBus.syncPublisher(CargoProjectsService.CARGO_PROJECTS_TOPIC)
                             .cargoProjectsUpdated(projects)
+                        initialized = true
                     }
                 }
 

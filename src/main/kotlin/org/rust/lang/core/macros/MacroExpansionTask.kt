@@ -22,7 +22,6 @@ import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.wm.ex.ProgressIndicatorEx
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.search.GlobalSearchScope
-import com.intellij.psi.search.GlobalSearchScopes
 import com.intellij.util.containers.ContainerUtil
 import com.intellij.util.io.storage.HeavyProcessLatch
 import org.rust.lang.core.psi.RsMacroCall
@@ -46,7 +45,8 @@ abstract class MacroExpansionTaskBase(
     project: Project,
     private val storage: ExpandedMacroStorage,
     private val pool: Executor,
-    private val realFsExpansionContentRoot: VirtualFile,
+    private val vfsBatchFactory: () -> MacroExpansionVfsBatch,
+    private val createExpandedSearchScope: (Int) -> GlobalSearchScope,
     private val stepModificationTracker: SimpleModificationTracker
 ) : Task.Backgroundable(project, "Expanding Rust macros", /* canBeCancelled = */ false) {
     private val transactionExecutor = TransactionExecutor(project)
@@ -163,7 +163,7 @@ abstract class MacroExpansionTaskBase(
         estimateStages.set(0)
         doneStages.set(0)
 
-        val scope = createExpandedSearchScope()
+        val scope = createExpandedSearchScope(currentStep.get())
         val expansionState = MacroExpansionManager.ExpansionState(scope, stepModificationTracker)
 
         // All subsequent parallelStream tasks are executed on the same [pool]
@@ -220,27 +220,22 @@ abstract class MacroExpansionTaskBase(
                 //  the storage, so if we created some files, we must add them to the storage, or they will be leaked.
                 // We can cancel task if the project is disposed b/c after project reopen storage consistency will be
                 // re-checked
-                val stages3fs = stages2.chunked(VFS_BATCH_SIZE).map { stages2c ->
-                    val fs = LocalFsMacroExpansionVfsBatch(realFsExpansionContentRoot.pathAsPath)
-                    val stages3 = stages2c.map { stage2 ->
-                        if (project.isDisposed) throw ProcessCanceledException()
-                        val result = stage2.writeExpansionToFs(fs, currentStep.get())
-                        doneStages.incrementAndGet()
-                        result
-                    }
-                    stages3 to fs
-                }
 
                 // Note that if project is disposed, this task will not be executed or may be executed partially
-                executeSequentially(transactionExecutor, stages3fs) { (stages3, fs) ->
+                executeSequentially(transactionExecutor, stages2.chunked(VFS_BATCH_SIZE)) { stages2c ->
                     runWriteAction {
+                        val fs = vfsBatchFactory()
+                        val stages3 = stages2c.map { stage2 ->
+                            val result = stage2.writeExpansionToFs(fs, currentStep.get())
+                            result
+                        }
                         fs.applyToVfs()
                         for (stage3 in stages3) {
                             stage3.save(storage)
-                            doneStages.incrementAndGet()
                         }
+                        doneStages.addAndGet(stages3.size * 2)
                     }
-                    totalExpanded.addAndGet(stages3.size)
+                    totalExpanded.addAndGet(stages2c.size)
                     Unit
                 }.thenApply { Unit }
             } else {
@@ -296,15 +291,6 @@ abstract class MacroExpansionTaskBase(
         MACRO_LOG.debug("Moving of pending files to step $step: ${duration / 1000} μs")
     }
 
-    private fun createExpandedSearchScope(): GlobalSearchScope {
-        val step = currentStep.get()
-        val expansionDirs = (0 until step).mapNotNull {
-            realFsExpansionContentRoot.findChild(it.toString())
-        }
-        val expansionScope = GlobalSearchScopes.directoriesScope(project, true, *expansionDirs.toTypedArray())
-        return GlobalSearchScope.allScope(project).uniteWith(expansionScope)
-    }
-
     protected abstract fun getMacrosToExpand(): Sequence<List<Extractable>>
 
     open fun canEat(other: MacroExpansionTaskBase): Boolean = false
@@ -315,7 +301,7 @@ abstract class MacroExpansionTaskBase(
         /**
          * Higher values leads to better throughput (overall expansion time), but worse latency (UI freezes)
          */
-        private const val VFS_BATCH_SIZE = 50
+        private const val VFS_BATCH_SIZE = 200
     }
 }
 
