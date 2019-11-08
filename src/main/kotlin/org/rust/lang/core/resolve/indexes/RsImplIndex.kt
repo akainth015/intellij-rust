@@ -42,7 +42,7 @@ class RsImplIndex : AbstractStubIndex<TyFingerprint, RsImplItem>() {
             return findPotentialImplsInner(project, TyFingerprint.TYPE_PARAMETER_FINGERPRINT, processor)
         }
 
-        private fun findPotentialImplsInner(
+        fun findPotentialImplsInner(
             project: Project,
             tyf: TyFingerprint,
             processor: RsProcessor<RsCachedImplItem>

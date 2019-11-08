@@ -831,4 +831,14 @@ class RsTypeAwareResolveTest : RsResolveTestBase() {
             let a = f64::INFINITY;
         }              //^
     """)
+
+    fun `test impl for alias`() = checkByCode("""
+        struct X;
+        type Y = X;
+        impl Y { fn foo(&self) {} }
+                  //X
+        fn main() {
+            X.foo();
+        }   //^
+    """)
 }

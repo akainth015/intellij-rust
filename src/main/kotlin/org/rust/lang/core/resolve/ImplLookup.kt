@@ -12,6 +12,7 @@ import org.rust.lang.core.macros.macroExpansionManager
 import org.rust.lang.core.psi.*
 import org.rust.lang.core.psi.ext.*
 import org.rust.lang.core.resolve.indexes.RsImplIndex
+import org.rust.lang.core.resolve.indexes.RsTypeAliasIndex
 import org.rust.lang.core.types.*
 import org.rust.lang.core.types.infer.*
 import org.rust.lang.core.types.ty.*
@@ -390,8 +391,13 @@ class ImplLookup(
     }
 
     private fun findExplicitImpls(selfTy: Ty, processor: RsProcessor<RsCachedImplItem>): Boolean {
-        return RsImplIndex.findPotentialImpls(project, selfTy) { cachedImpl ->
-            val (type, generics) = cachedImpl.typeAndGenerics ?: return@findPotentialImpls false
+        return processImplsWithAliases(selfTy) { tyFingerprint ->
+            findExplicitImplsWithoutAliases(selfTy, tyFingerprint, processor)
+        }
+    }
+    private fun findExplicitImplsWithoutAliases(selfTy: Ty, tyf: TyFingerprint, processor: RsProcessor<RsCachedImplItem>): Boolean {
+        return RsImplIndex.findPotentialImplsInner(project, tyf) { cachedImpl ->
+            val (type, generics) = cachedImpl.typeAndGenerics ?: return@findPotentialImplsInner false
             val subst = generics.associateWith { ctx.typeVarForParam(it) }.toTypeSubst()
             // TODO: take into account the lifetimes (?)
             val formalSelfTy = type.substitute(subst)
@@ -401,6 +407,30 @@ class ImplLookup(
                 (cachedImpl.isInherent || cachedImpl.implementedTrait != null)
             isAppropriateImpl && processor(cachedImpl)
         }
+    }
+
+    private fun processImplsWithAliases(selfTy: Ty, processor: RsProcessor<TyFingerprint>): Boolean {
+        val fingerprint = TyFingerprint.create(selfTy)
+        if (fingerprint != null) {
+            val set = mutableSetOf(fingerprint)
+            if (processor(fingerprint)) return true
+            val result = RsTypeAliasIndex.findPotentialAliases(project, fingerprint) {
+                val name = it.name ?: return@findPotentialAliases false
+                val aliasFingerprint = TyFingerprint(name)
+                set.add(aliasFingerprint) &&
+                    canCombineTypes(selfTy, it.declaredType, it.generics) &&
+                    processor(aliasFingerprint)
+            }
+            if (result) return true
+        }
+        return processor(TyFingerprint.TYPE_PARAMETER_FINGERPRINT)
+    }
+
+    private fun canCombineTypes(ty1: Ty, ty2: Ty, genericsForTy2: List<TyTypeParameter>): Boolean {
+        val subst = genericsForTy2.associateWith { ctx.typeVarForParam(it) }.toTypeSubst()
+        // TODO: take into account the lifetimes (?)
+        val ty2subst = ty2.substitute(subst)
+        return ctx.canCombineTypes(ty2subst, ty1)
     }
 
     /**
@@ -542,7 +572,13 @@ class ImplLookup(
     }
 
     private fun assembleImplCandidates(ref: TraitRef, processor: RsProcessor<SelectionCandidate>): Boolean {
-        return RsImplIndex.findPotentialImpls(project, ref.selfTy) {
+        return processImplsWithAliases(ref.selfTy) { tyFingerprint ->
+            assembleImplCandidatesWithoutAliases(ref, tyFingerprint, processor)
+        }
+    }
+
+    private fun assembleImplCandidatesWithoutAliases(ref: TraitRef, tyf: TyFingerprint, processor: RsProcessor<SelectionCandidate>): Boolean {
+        return RsImplIndex.findPotentialImplsInner(project, tyf) {
             val candidate = it.trySelectCandidate(ref)
             candidate != null && processor(candidate)
         }
