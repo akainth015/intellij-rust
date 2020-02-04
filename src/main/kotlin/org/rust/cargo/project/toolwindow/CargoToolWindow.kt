@@ -8,7 +8,7 @@ package org.rust.cargo.project.toolwindow
 import com.intellij.ide.DefaultTreeExpander
 import com.intellij.ide.TreeExpander
 import com.intellij.openapi.actionSystem.*
-import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.invokeLater
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.SimpleToolWindowPanel
@@ -87,14 +87,14 @@ class CargoToolWindow(
         with(project.messageBus.connect()) {
             subscribe(CargoProjectsService.CARGO_PROJECTS_TOPIC, object : CargoProjectsService.CargoProjectsListener {
                 override fun cargoProjectsUpdated(projects: Collection<CargoProject>) {
-                    ApplicationManager.getApplication().invokeLater {
+                    invokeLater {
                         projectStructure.updateCargoProjects(projects.sortedBy { it.manifest })
                     }
                 }
             })
         }
 
-        ApplicationManager.getApplication().invokeLater {
+        invokeLater {
             projectStructure.updateCargoProjects(project.cargoProjects.allProjects.sortedBy { it.manifest })
         }
     }

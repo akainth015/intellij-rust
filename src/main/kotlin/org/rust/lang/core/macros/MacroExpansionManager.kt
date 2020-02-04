@@ -369,7 +369,7 @@ private class MacroExpansionServiceImplInner(
             val oldDirPath = Paths.get(PathManager.getTempPath()).resolve("rust_expanded_macros")
             if (oldDirPath.exists()) {
                 oldDirPath.delete()
-                ApplicationManager.getApplication().invokeLater {
+                invokeLater {
                     runWriteAction {
                         LocalFileSystem.getInstance().refreshAndFindFileByIoFile(oldDirPath.toFile())
                     }
