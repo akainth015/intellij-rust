@@ -17,13 +17,14 @@ import org.rust.cargo.project.settings.rustSettings
 import org.rust.cargo.project.settings.toolchain
 import org.rust.cargo.project.workspace.CargoWorkspace
 import org.rust.cargo.runconfig.command.workingDirectory
+import org.rust.cargo.toolchain.RustToolchain.Companion.RUSTFMT
 import org.rust.lang.core.psi.ext.edition
 import org.rust.lang.core.psi.isNotRustFile
 import org.rust.openapiext.*
 import org.rust.stdext.buildList
 import java.nio.file.Path
 
-class Rustfmt(private val rustfmtExecutable: Path) {
+class Rustfmt(private val toolchain: RustToolchain) {
 
     @Throws(ExecutionException::class)
     fun reformatDocumentText(cargoProject: CargoProject, document: Document): String? {
@@ -55,10 +56,7 @@ class Rustfmt(private val rustfmtExecutable: Path) {
         }
 
         val processOutput = try {
-            GeneralCommandLine(rustfmtExecutable)
-                .withWorkDirectory(cargoProject.workingDirectory)
-                .withParameters(arguments)
-                .withCharset(Charsets.UTF_8)
+            toolchain.createGeneralCommandLine(RUSTFMT, *arguments.toTypedArray())
                 .execute(cargoProject.project, false, stdIn = document.text.toByteArray())
         } catch (e: ExecutionException) {
             if (isUnitTestMode) throw e else return null
@@ -85,10 +83,7 @@ class Rustfmt(private val rustfmtExecutable: Path) {
         if (!cargoProject.project.rustSettings.useSkipChildren) return false
         val channel = cargoProject.rustcInfo?.version?.channel
         if (channel != RustChannel.NIGHTLY) return false
-        return GeneralCommandLine(rustfmtExecutable)
-            .withParameters("-h")
-            .withWorkDirectory(cargoProject.workingDirectory)
-            .execute()
+        return toolchain.runTool(RUSTFMT, "-h", workingDirectory = cargoProject.workingDirectory)
             ?.stdoutLines
             ?.contains(" --skip-children ")
             ?: false
