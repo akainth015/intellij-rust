@@ -58,6 +58,9 @@ class RustProjectSettingsPanel(
 
     var data: Data
         get() {
+            if (pathToToolchainField.text.isEmpty()) {
+                return Data(null, null)
+            }
             val toolchain = RustToolchain.get(Paths.get(pathToToolchainField.text))
             return Data(
                 toolchain = toolchain,
@@ -95,6 +98,9 @@ class RustProjectSettingsPanel(
         val pathToToolchain = pathToToolchainField.text
         versionUpdateDebouncer.run(
             onPooledThread = {
+                if (pathToToolchain.isEmpty()) {
+                    return@run Triple(null, null, false)
+                }
                 val toolchain = RustToolchain.get(Paths.get(pathToToolchain))
                 val rustcVersion = toolchain.queryVersions().rustc?.semver
                 val rustup = toolchain.rustup
